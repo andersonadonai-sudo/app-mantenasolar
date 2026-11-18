@@ -1,6 +1,6 @@
 /**
  * ============================================================
- *  MANTENA SOLAR - APP DE VISITAS v3.1
+ *  MANTENA SOLAR - APP DE VISITAS v3.2
  *
  *  ARQUIVO UNICO DE 38 KB - copie TUDO e cole no lugar de tudo.
  *  A TELA VEM DA INTERNET (nao precisa criar App.html, nao ha blocos).
@@ -10,6 +10,7 @@
  *   2. Cole este arquivo inteiro e salve (Ctrl+S)
  *   3. Implantar > Gerenciar implantacoes > lapis > Nova versao > Implantar
  *
+ *  v3.2: corrige a tela comprimida (gzip) = Malformed HTML content
  *  v3.1: filtros por vendedor/usina/etapa, busca, detalhe do lead,
  *        agenda com proximos contatos, lancamentos do time para o gestor
  * ============================================================
@@ -105,6 +106,7 @@ var ACOES = ['LIGAR', 'VISITA TÉCNICA', 'ENVIAR PROPOSTA', 'MANDAR MENSAGEM',
  */
 var URL_TELA = 'https://raw.githubusercontent.com/andersonadonai-sudo/app-mantenasolar/main/app-screen.html';
 var URL_TELA2 = 'https://cdn.jsdelivr.net/gh/andersonadonai-sudo/app-mantenasolar@main/app-screen.html';
+var URL_TELA3 = 'https://cdn.statically.io/gh/andersonadonai-sudo/app-mantenasolar/main/app-screen.html';
 
 function doGet(e) {
   garantirFuso();
@@ -154,21 +156,21 @@ function buscarTela() {
   } catch (err) {}
 
   // 3) internet
-  var urls = [URL_TELA, URL_TELA2];
+  var urls = [URL_TELA, URL_TELA2, URL_TELA3];
   for (var u = 0; u < urls.length; u++) {
     try {
       var resp = UrlFetchApp.fetch(urls[u] + '?t=' + new Date().getTime(), {
         muteHttpExceptions: true,
-        followRedirects: true
+        followRedirects: true,
+        headers: { 'Accept-Encoding': 'identity' }
       });
-      if (resp.getResponseCode() === 200) {
-        var txt = resp.getContentText();
-        if (txt && txt.length > 5000 && txt.indexOf('function filtrarLista') > -1) {
-          try {
-            CacheService.getScriptCache().put('tela_v3', txt, 300);
-          } catch (err) {}
-          return txt;
-        }
+      if (resp.getResponseCode() !== 200) continue;
+      var txt = lerTexto(resp);
+      if (txt && txt.length > 5000 && txt.indexOf('function filtrarLista') > -1) {
+        try {
+          CacheService.getScriptCache().put('tela_v32', txt, 300);
+        } catch (err) {}
+        return txt;
       }
     } catch (err) {}
   }
@@ -176,17 +178,52 @@ function buscarTela() {
   return null;
 }
 
+/**
+ * Le a resposta como texto.
+ * O GitHub pode mandar o arquivo COMPRIMIDO (gzip). Quando isso acontece
+ * getContentText() devolve lixo binario e o HtmlService reclama
+ * "Malformed HTML content". Aqui detectamos e descompactamos.
+ */
+function lerTexto(resp) {
+  var txt = '';
+  try { txt = resp.getContentText(); } catch (e) {}
+  if (txt && txt.indexOf('function filtrarLista') > -1) return txt;
+
+  var blob = null;
+  try { blob = resp.getBlob(); } catch (e) {}
+  if (!blob) return txt;
+
+  var bytes = null;
+  try { bytes = blob.getBytes(); } catch (e) {}
+  if (bytes && bytes.length > 2) {
+    var b0 = bytes[0] & 255, b1 = bytes[1] & 255;
+    if (b0 === 31 && b1 === 139) {                 // assinatura gzip
+      try {
+        var des = Utilities.ungzip(blob).getDataAsString();
+        if (des && des.indexOf('function filtrarLista') > -1) return des;
+      } catch (e) {}
+    }
+  }
+
+  try {
+    var cru = blob.getDataAsString();
+    if (cru && cru.indexOf('function filtrarLista') > -1) return cru;
+  } catch (e) {}
+
+  return txt;
+}
+
 /** Rode para conferir se a tela carrega da internet */
 function testarTela() {
   var t = buscarTela();
   if (!t) {
     return 'FALHOU: nao consegui buscar a tela.\n' +
-           'Verifique: ' + URL_TELA;
+           'Tentei:\n' + URL_TELA + '\n' + URL_TELA2 + '\n' + URL_TELA3;
   }
   var l = [];
   l.push('TELA CARREGADA DA INTERNET: OK');
   l.push('tamanho: ' + t.length + ' caracteres');
-  l.push('versao v3.1: ' + (t.indexOf('v3.1') > -1 ? 'SIM' : 'nao'));
+  l.push('versao v3.2: ' + (t.indexOf('v3.1') > -1 ? 'SIM' : 'nao'));
   l.push('filtros (filtrarLista): ' + (t.indexOf('function filtrarLista') > -1 ? 'OK' : 'FALTA'));
   l.push('campo de busca: ' + (t.indexOf('buscaLead') > -1 ? 'OK' : 'FALTA'));
   l.push('botoes de classificacao: ' + (t.indexOf('cls-grid') > -1 ? 'OK' : 'FALTA'));
